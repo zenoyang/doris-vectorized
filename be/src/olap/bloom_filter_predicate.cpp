@@ -18,6 +18,11 @@
 #include "olap/bloom_filter_predicate.h"
 
 #include "exprs/create_predicate_function.h"
+#include "vec/columns/column_nullable.h"
+#include "vec/columns/column_vector.h"
+#include "vec/utils/util.hpp"
+
+using namespace doris::vectorized;
 
 #define APPLY_FOR_PRIMTYPE(M) \
     M(TYPE_TINYINT)           \
@@ -34,6 +39,81 @@
     M(TYPE_STRING)
 
 namespace doris {
+
+// blomm filter column predicate do not support in segment v1
+template <PrimitiveType type>
+void BloomFilterColumnPredicate<type>::evaluate(VectorizedRowBatch* batch) const {
+    uint16_t n = batch->size();
+    uint16_t* sel = batch->selected();
+    if (!batch->selected_in_use()) {
+        for (uint16_t i = 0; i != n; ++i) {
+            sel[i] = i;
+        }
+    }
+}
+
+template <PrimitiveType type>
+void BloomFilterColumnPredicate<type>::evaluate(ColumnBlock* block, uint16_t* sel,
+                                                uint16_t* size) const {
+    uint16_t new_size = 0;
+    if (block->is_nullable()) {
+        for (uint16_t i = 0; i < *size; ++i) {
+            uint16_t idx = sel[i];
+            sel[new_size] = idx;
+            const auto* cell_value = reinterpret_cast<const void*>(block->cell(idx).cell_ptr());
+            new_size +=
+                    (!block->cell(idx).is_null() && _specific_filter->find_olap_engine(cell_value));
+        }
+    } else {
+        for (uint16_t i = 0; i < *size; ++i) {
+            uint16_t idx = sel[i];
+            sel[new_size] = idx;
+            const auto* cell_value = reinterpret_cast<const void*>(block->cell(idx).cell_ptr());
+            new_size += _specific_filter->find_olap_engine(cell_value);
+        }
+    }
+    *size = new_size;
+}
+
+template <PrimitiveType type>
+void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uint16_t* sel,
+                                                uint16_t* size) const {
+    uint16_t new_size = 0;
+    auto& null_map_data = ColumnUInt8::create(*size, 0)->get_data();
+
+    IColumn& col = column;
+    if (auto* nullable = check_and_get_column<ColumnNullable>(column)) {
+        col = nullable->get_nested_column();
+        vectorized::VectorizedUtils::update_null_map(null_map_data, nullable->get_null_map_data());
+    }
+
+    switch (type) {
+    case TYPE_BOOLEAN:
+    case TYPE_TINYINT:
+    case TYPE_SMALLINT:
+    case TYPE_INT:
+    case TYPE_BIGINT:
+    case TYPE_LARGEINT:
+    case TYPE_FLOAT:
+    case TYPE_DOUBLE:
+        using T = typename PrimitiveTypeTraits<type>::CppType;
+        if (auto* col_vec = check_and_get_column<vectorized::ColumnVector<T>>(col)) {
+            for (uint16_t i = 0; i < *size; ++i) {
+                uint16_t idx = sel[i];
+                sel[new_size] = idx;
+                const auto* cell_value = reinterpret_cast<const void*>(&col_vec->get_element(idx));
+                new_size +=
+                        (null_map_data[i] == 0 && _specific_filter->find_olap_engine(cell_value));
+            }
+        }
+        break;
+    default:
+        DCHECK(false) << "Invalid bloom filter type " << type_to_string(type);
+        break;
+    }
+    *size = new_size;
+}
+
 ColumnPredicate* BloomFilterColumnPredicateFactory::create_column_predicate(
         uint32_t column_id, const std::shared_ptr<IBloomFilterFuncBase>& bloom_filter,
         FieldType type) {
