@@ -28,6 +28,10 @@
 #include "runtime/string_value.hpp"
 #include "runtime/vectorized_row_batch.h"
 #include "util/logging.h"
+#include "vec/columns/column_nullable.h"
+#include "vec/core/block.h"
+
+using namespace doris::vectorized;
 
 namespace doris {
 
@@ -135,6 +139,20 @@ TEST_F(TestBloomFilterColumnPredicate, FLOAT_COLUMN) {
     ASSERT_FLOAT_EQ(*(float*)col_block.cell(_row_block->selection_vector()[1]).cell_ptr(), 5.1);
     ASSERT_FLOAT_EQ(*(float*)col_block.cell(_row_block->selection_vector()[2]).cell_ptr(), 6.1);
 
+    // for vectorized::Block no null
+    vectorized::Block vec_block0 = tablet_schema.create_block(return_columns);
+    _row_block->convert_to_vec_block(&vec_block0);
+    ColumnPtr vec_col0 = vec_block0.get_columns()[0];
+    pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col0),
+                   _row_block->selection_vector(), &select_size);
+    ASSERT_EQ(select_size, 3);
+    auto* nullable = check_and_get_column<ColumnNullable>(*vec_col0);
+    auto* vec =
+            check_and_get_column<vectorized::ColumnVector<float>>(nullable->get_nested_column());
+    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[0])), 4.1);
+    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[1])), 5.1);
+    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[2])), 6.1);
+
     // for VectorizedBatch has nulls
     col_vector->set_no_nulls(false);
     bool* is_null = reinterpret_cast<bool*>(_mem_pool->allocate(size));
@@ -171,6 +189,17 @@ TEST_F(TestBloomFilterColumnPredicate, FLOAT_COLUMN) {
     pred->evaluate(&col_block, _row_block->selection_vector(), &select_size);
     ASSERT_EQ(select_size, 1);
     ASSERT_FLOAT_EQ(*(float*)col_block.cell(_row_block->selection_vector()[0]).cell_ptr(), 5.1);
+
+    // for vectorized::Block has nulls
+    vectorized::Block vec_block1 = tablet_schema.create_block(return_columns);
+    _row_block->convert_to_vec_block(&vec_block1);
+    vectorized::ColumnPtr vec_col1 = vec_block1.get_columns()[0];
+    pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col1),
+                   _row_block->selection_vector(), &select_size);
+    ASSERT_EQ(select_size, 1);
+    nullable = check_and_get_column<ColumnNullable>(*vec_col1);
+    vec = check_and_get_column<vectorized::ColumnVector<float>>(nullable->get_nested_column());
+    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[0])), 5.1);
 
     delete pred;
 }
