@@ -79,11 +79,13 @@ template <PrimitiveType type>
 void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uint16_t* sel,
                                                 uint16_t* size) const {
     uint16_t new_size = 0;
-    auto& null_map_data = ColumnUInt8::create(*size, 0)->get_data();
+    auto null_map = ColumnUInt8::create(column.size(), 0);
+    auto& null_map_data = null_map->get_data();
+    ColumnPtr col_ptr = column.get_ptr();
 
-    IColumn& col = column;
-    if (auto* nullable = check_and_get_column<ColumnNullable>(column)) {
-        col = nullable->get_nested_column();
+    if (column.is_nullable()) {
+        auto* nullable = check_and_get_column<ColumnNullable>(column);
+        col_ptr = nullable->get_nested_column_ptr();
         vectorized::VectorizedUtils::update_null_map(null_map_data, nullable->get_null_map_data());
     }
 
@@ -97,7 +99,7 @@ void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uin
     case TYPE_FLOAT:
     case TYPE_DOUBLE:
         using T = typename PrimitiveTypeTraits<type>::CppType;
-        if (auto* col_vec = check_and_get_column<vectorized::ColumnVector<T>>(col)) {
+        if (auto* col_vec = check_and_get_column<vectorized::ColumnVector<T>>(*col_ptr)) {
             for (uint16_t i = 0; i < *size; ++i) {
                 uint16_t idx = sel[i];
                 sel[new_size] = idx;
