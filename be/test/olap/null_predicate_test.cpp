@@ -196,7 +196,7 @@ public:
         vec_col = vec_block.get_columns()[0];                                                    \
         pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),                        \
                        _row_block->selection_vector(), &select_size);                            \
-        ASSERT_EQ(select_size, 2);                                                               \
+        ASSERT_EQ(select_size, 5);                                                               \
         pred.reset();                                                                            \
     }
 
