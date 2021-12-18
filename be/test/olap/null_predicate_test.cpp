@@ -146,6 +146,16 @@ public:
         pred->evaluate(&col_block, _row_block->selection_vector(), &select_size);                \
         ASSERT_EQ(select_size, 0);                                                               \
                                                                                                  \
+        /* for vectorized::Block no null */                                                      \
+        _row_block->clear();                                                                     \
+        select_size = _row_block->selected_size();                                               \
+        vectorized::Block vec_block = tablet_schema.create_block(return_columns);                \
+        _row_block->convert_to_vec_block(&vec_block);                                            \
+        ColumnPtr vec_col = vec_block.get_columns()[0];                                          \
+        pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),                        \
+                       _row_block->selection_vector(), &select_size);                            \
+        ASSERT_EQ(select_size, 0);                                                               \
+                                                                                                 \
         /* for has nulls */                                                                      \
         col_vector->set_no_nulls(false);                                                         \
         bool* is_null = reinterpret_cast<bool*>(_mem_pool->allocate(size));                      \
@@ -177,6 +187,16 @@ public:
         select_size = _row_block->selected_size();                                               \
         pred->evaluate(&col_block, _row_block->selection_vector(), &select_size);                \
         ASSERT_EQ(select_size, 5);                                                               \
+                                                                                                 \
+        /* for vectorized::Block has nulls */                                                    \
+        _row_block->clear();                                                                     \
+        select_size = _row_block->selected_size();                                               \
+        vec_block = tablet_schema.create_block(return_columns);                                  \
+        _row_block->convert_to_vec_block(&vec_block);                                            \
+        vec_col = vec_block.get_columns()[0];                                                    \
+        pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),                        \
+                       _row_block->selection_vector(), &select_size);                            \
+        ASSERT_EQ(select_size, 2);                                                               \
         pred.reset();                                                                            \
     }
 
