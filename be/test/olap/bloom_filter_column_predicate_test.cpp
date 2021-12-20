@@ -183,13 +183,13 @@ TEST_F(TestBloomFilterColumnPredicate, FLOAT_COLUMN) {
         *reinterpret_cast<float*>(col_block_view.data()) = i + 0.1f;
     }
     _row_block->clear();
-    auto vec_sel_size = _row_block->selected_size();
+    select_size = _row_block->selected_size();
     vectorized::Block vec_block = tablet_schema.create_block(return_columns);
     _row_block->convert_to_vec_block(&vec_block);
     ColumnPtr vec_col = vec_block.get_columns()[0];
     pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),
-                   _row_block->selection_vector(), &vec_sel_size);
-    ASSERT_EQ(vec_sel_size, 3);
+                   _row_block->selection_vector(), &select_size);
+    ASSERT_EQ(select_size, 3);
     auto* nullable = check_and_get_column<ColumnNullable>(*vec_col);
     auto* vec =
             check_and_get_column<vectorized::ColumnVector<float>>(nullable->get_nested_column());
@@ -208,13 +208,13 @@ TEST_F(TestBloomFilterColumnPredicate, FLOAT_COLUMN) {
         }
     }
     _row_block->clear();
-    vec_sel_size = _row_block->selected_size();
+    select_size = _row_block->selected_size();
     vec_block = tablet_schema.create_block(return_columns);
     _row_block->convert_to_vec_block(&vec_block);
     vec_col = vec_block.get_columns()[0];
     pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),
-                   _row_block->selection_vector(), &vec_sel_size);
-    ASSERT_EQ(vec_sel_size, 1);
+                   _row_block->selection_vector(), &select_size);
+    ASSERT_EQ(select_size, 1);
     nullable = check_and_get_column<ColumnNullable>(*vec_col);
     vec = check_and_get_column<vectorized::ColumnVector<float>>(nullable->get_nested_column());
     ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[0])), 5.1);
