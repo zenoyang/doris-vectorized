@@ -29,6 +29,7 @@
 #include "runtime/vectorized_row_batch.h"
 #include "util/logging.h"
 #include "vec/columns/column_nullable.h"
+#include "vec/columns/predicate_column.h"
 #include "vec/core/block.h"
 
 using namespace doris::vectorized;
@@ -187,6 +188,12 @@ TEST_F(TestBloomFilterColumnPredicate, FLOAT_COLUMN) {
     vectorized::Block vec_block = tablet_schema.create_block(return_columns);
     _row_block->convert_to_vec_block(&vec_block);
     ColumnPtr vec_col = vec_block.get_columns()[0];
+
+    //    MutableColumnPtr mutable_ptr = (*std::move(vec_col)).assume_mutable();
+    //    PredicateColumnType<float>& pred_col =
+    //            reinterpret_cast<PredicateColumnType<float>&>(*mutable_ptr);
+    //    pred->evaluate(pred_col, _row_block->selection_vector(), &select_size);
+
     pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),
                    _row_block->selection_vector(), &select_size);
     ASSERT_EQ(select_size, 3);

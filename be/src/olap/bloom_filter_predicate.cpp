@@ -20,6 +20,7 @@
 #include "exprs/create_predicate_function.h"
 #include "vec/columns/column_nullable.h"
 #include "vec/columns/column_vector.h"
+#include "vec/columns/predicate_column.h"
 #include "vec/utils/util.hpp"
 
 using namespace doris::vectorized;
@@ -75,6 +76,7 @@ void BloomFilterColumnPredicate<type>::evaluate(ColumnBlock* block, uint16_t* se
     *size = new_size;
 }
 
+#if 0
 template <PrimitiveType type>
 void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uint16_t* sel,
                                                 uint16_t* size) const {
@@ -100,6 +102,44 @@ void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uin
     }
     *size = new_size;
 }
+#endif
+
+#if 1
+template <PrimitiveType type>
+void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uint16_t* sel,
+                                                uint16_t* size) const {
+    uint16_t new_size = 0;
+    using T = typename PrimitiveTypeTraits<type>::CppType;
+
+    if (column.is_nullable()) {
+        auto* nullable_column =
+                vectorized::check_and_get_column<vectorized::ColumnNullable>(column);
+        auto& null_bitmap = reinterpret_cast<const vectorized::ColumnVector<uint8_t>&>(
+                                    *(nullable_column->get_null_map_column_ptr()))
+                                    .get_data();
+        auto* nest_column_vector =
+                vectorized::check_and_get_column<vectorized::PredicateColumnType<T>>(
+                        nullable_column->get_nested_column());
+        auto& data_array = nest_column_vector->get_data();
+        for (uint16_t i = 0; i < *size; i++) {
+            uint16_t idx = sel[i];
+            sel[new_size] = idx;
+            const auto* cell_value = reinterpret_cast<const void*>(&(data_array[idx]));
+            new_size += (!null_bitmap[idx]) && _specific_filter->find_olap_engine(cell_value);
+        }
+    } else {
+        auto& pred_column_ref = reinterpret_cast<vectorized::PredicateColumnType<T>&>(column);
+        auto& data_array = pred_column_ref.get_data();
+        for (uint16_t i = 0; i < *size; i++) {
+            uint16_t idx = sel[i];
+            sel[new_size] = idx;
+            const auto* cell_value = reinterpret_cast<const void*>(&(data_array[idx]));
+            new_size += _specific_filter->find_olap_engine(cell_value);
+        }
+    }
+    *size = new_size;
+}
+#endif
 
 ColumnPredicate* BloomFilterColumnPredicateFactory::create_column_predicate(
         uint32_t column_id, const std::shared_ptr<IBloomFilterFuncBase>& bloom_filter,
