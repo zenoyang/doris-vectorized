@@ -29,6 +29,7 @@
 #include "runtime/vectorized_row_batch.h"
 #include "util/logging.h"
 #include "vec/columns/column_nullable.h"
+#include "vec/columns/predicate_column.h"
 #include "vec/core/block.h"
 
 using namespace doris::vectorized;
@@ -177,47 +178,35 @@ TEST_F(TestBloomFilterColumnPredicate, FLOAT_COLUMN) {
     ASSERT_FLOAT_EQ(*(float*)col_block.cell(_row_block->selection_vector()[0]).cell_ptr(), 5.1);
 
     // for vectorized::Block no null
-    col_block_view = ColumnBlockView(&col_block);
-    for (int i = 0; i < size; ++i, col_block_view.advance(1)) {
-        col_block_view.set_null_bits(1, false);
-        *reinterpret_cast<float*>(col_block_view.data()) = i + 0.1f;
+    auto pred_col = PredicateColumnType<vectorized::Float32>::create();
+    pred_col->reserve(size);
+    for (int i = 0; i < size; ++i) {
+        *(col_data + i) = i + 0.1f;
+        pred_col->insert_data(reinterpret_cast<const char*>(col_data + i), 0);
     }
     _row_block->clear();
     select_size = _row_block->selected_size();
-    vectorized::Block vec_block = tablet_schema.create_block(return_columns);
-    _row_block->convert_to_vec_block(&vec_block);
-    ColumnPtr vec_col = vec_block.get_columns()[0];
-    pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),
-                   _row_block->selection_vector(), &select_size);
+    pred->evaluate(*pred_col, _row_block->selection_vector(), &select_size);
     ASSERT_EQ(select_size, 3);
-    auto* nullable = check_and_get_column<ColumnNullable>(*vec_col);
-    auto* vec =
-            check_and_get_column<vectorized::ColumnVector<float>>(nullable->get_nested_column());
-    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[0])), 4.1);
-    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[1])), 5.1);
-    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[2])), 6.1);
+    ASSERT_FLOAT_EQ((float)pred_col->get_data()[_row_block->selection_vector()[0]], 4.1);
+    ASSERT_FLOAT_EQ((float)pred_col->get_data()[_row_block->selection_vector()[1]], 5.1);
+    ASSERT_FLOAT_EQ((float)pred_col->get_data()[_row_block->selection_vector()[2]], 6.1);
 
     // for vectorized::Block has nulls
-    col_block_view = ColumnBlockView(&col_block);
-    for (int i = 0; i < size; ++i, col_block_view.advance(1)) {
-        if (i % 2 == 0) {
-            col_block_view.set_null_bits(1, true);
-        } else {
-            col_block_view.set_null_bits(1, false);
-            *reinterpret_cast<float*>(col_block_view.data()) = i + 0.1;
-        }
+    auto null_map = ColumnUInt8::create(size, 0);
+    auto& null_map_data = null_map->get_data();
+    for (int i = 0; i < size; ++i) {
+        null_map_data[i] = (i % 2 == 0);
     }
     _row_block->clear();
     select_size = _row_block->selected_size();
-    vec_block = tablet_schema.create_block(return_columns);
-    _row_block->convert_to_vec_block(&vec_block);
-    vec_col = vec_block.get_columns()[0];
-    pred->evaluate(const_cast<doris::vectorized::IColumn&>(*vec_col),
-                   _row_block->selection_vector(), &select_size);
+    auto nullable_col =
+            vectorized::ColumnNullable::create(std::move(pred_col), std::move(null_map));
+    pred->evaluate(*nullable_col, _row_block->selection_vector(), &select_size);
     ASSERT_EQ(select_size, 1);
-    nullable = check_and_get_column<ColumnNullable>(*vec_col);
-    vec = check_and_get_column<vectorized::ColumnVector<float>>(nullable->get_nested_column());
-    ASSERT_FLOAT_EQ((vec->get_element(_row_block->selection_vector()[0])), 5.1);
+    auto nested_col = check_and_get_column<PredicateColumnType<vectorized::Float32>>(
+            nullable_col->get_nested_column());
+    ASSERT_FLOAT_EQ((float)nested_col->get_data()[_row_block->selection_vector()[0]], 5.1);
 
     delete pred;
 }

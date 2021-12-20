@@ -20,6 +20,7 @@
 #include "exprs/create_predicate_function.h"
 #include "vec/columns/column_nullable.h"
 #include "vec/columns/column_vector.h"
+#include "vec/columns/predicate_column.h"
 #include "vec/utils/util.hpp"
 
 using namespace doris::vectorized;
@@ -79,22 +80,27 @@ template <PrimitiveType type>
 void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uint16_t* sel,
                                                 uint16_t* size) const {
     uint16_t new_size = 0;
+    using T = typename PrimitiveTypeTraits<type>::CppType;
+
     if (column.is_nullable()) {
-        auto* nullable = check_and_get_column<ColumnNullable>(column);
-        ColumnPtr nested_col = nullable->get_nested_column_ptr();
-        auto& null_map_data = nullable->get_null_map_data();
-        for (int i = 0; i < *size; ++i) {
+        auto* nullable_col = check_and_get_column<ColumnNullable>(column);
+        auto& null_map_data = nullable_col->get_null_map_column().get_data();
+        auto* pred_col =
+                check_and_get_column<PredicateColumnType<T>>(nullable_col->get_nested_column());
+        auto& pred_col_data = pred_col->get_data();
+        for (uint16_t i = 0; i < *size; i++) {
             uint16_t idx = sel[i];
             sel[new_size] = idx;
-            const auto* cell_value =
-                    reinterpret_cast<const void*>(nested_col->get_data_at(idx).data);
-            new_size += (null_map_data[idx] == 0 && _specific_filter->find_olap_engine(cell_value));
+            const auto* cell_value = reinterpret_cast<const void*>(&(pred_col_data[idx]));
+            new_size += (!null_map_data[idx]) && _specific_filter->find_olap_engine(cell_value);
         }
     } else {
-        for (int i = 0; i < *size; ++i) {
+        auto* pred_col = check_and_get_column<PredicateColumnType<T>>(column);
+        auto& pred_col_data = pred_col->get_data();
+        for (uint16_t i = 0; i < *size; i++) {
             uint16_t idx = sel[i];
             sel[new_size] = idx;
-            const auto* cell_value = reinterpret_cast<const void*>(column.get_data_at(idx).data);
+            const auto* cell_value = reinterpret_cast<const void*>(&(pred_col_data[idx]));
             new_size += _specific_filter->find_olap_engine(cell_value);
         }
     }

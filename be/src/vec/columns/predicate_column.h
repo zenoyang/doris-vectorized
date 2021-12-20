@@ -321,21 +321,33 @@ public:
     }
 
     template <typename Y>
-    ColumnPtr filter_default_type_by_selector(const uint16_t* sel, size_t sel_size, ColumnPtr* ptr = nullptr) {
+    ColumnPtr filter_default_type_by_selector(const uint16_t* sel, size_t sel_size,
+                                              ColumnPtr* ptr = nullptr) {
         // todo(wb) the operation which create a new column maybe should move to other place
-        MutableColumnPtr res_ptr = ptr == nullptr ? vectorized::ColumnVector<Y>::create() : (*std::move(*ptr)).assume_mutable();
-        if (sel_size == 0) {
+        if (ptr == nullptr) {
+            auto res_ptr = vectorized::ColumnVector<Y>::create();
+            if (sel_size == 0) {
+                return res_ptr;
+            }
+
+            for (size_t i = 0; i < sel_size; i++) {
+                T* val_ptr = &data[sel[i]];
+                res_ptr->insert_data((char*)val_ptr, 0);
+            }
+            return res_ptr;
+        } else {
+            auto res_ptr = (*std::move(*ptr)).assume_mutable();
+            if (sel_size == 0) {
+                return res_ptr;
+            }
+
+            for (size_t i = 0; i < sel_size; i++) {
+                T* val_ptr = &data[sel[i]];
+                res_ptr->insert_data((char*)val_ptr, 0);
+            }
             return res_ptr;
         }
-
-        for (size_t i = 0; i < sel_size; i++) {
-            T* val_ptr = &data[sel[i]];
-            res_ptr->insert_data((char*)val_ptr, 0);
-        }
-
-        return res_ptr;
     }
-
 
     ColumnPtr filter_by_selector(const uint16_t* sel, size_t sel_size, ColumnPtr* ptr = nullptr) override {
         if constexpr (std::is_same_v<T, StringValue>) {
@@ -363,6 +375,14 @@ public:
         } else {
             return filter_default_type_by_selector<T>(sel, sel_size, ptr);
         }
+    }
+
+    void replace_column_data(const IColumn&, size_t row, size_t self_row = 0) override {
+        LOG(FATAL) << "should not call replace_column_data_default in predicate column";
+    }
+
+    void replace_column_data_default(size_t self_row = 0) override {
+        LOG(FATAL) << "should not call replace_column_data_default in predicate column";
     }
 
 private:
