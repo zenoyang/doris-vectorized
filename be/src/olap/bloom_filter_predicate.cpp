@@ -79,39 +79,24 @@ template <PrimitiveType type>
 void BloomFilterColumnPredicate<type>::evaluate(vectorized::IColumn& column, uint16_t* sel,
                                                 uint16_t* size) const {
     uint16_t new_size = 0;
-    auto null_map = ColumnUInt8::create(column.size(), 0);
-    auto& null_map_data = null_map->get_data();
-    ColumnPtr col_ptr = column.get_ptr();
-
     if (column.is_nullable()) {
         auto* nullable = check_and_get_column<ColumnNullable>(column);
-        col_ptr = nullable->get_nested_column_ptr();
-        vectorized::VectorizedUtils::update_null_map(null_map_data, nullable->get_null_map_data());
-    }
-
-    switch (type) {
-    case TYPE_BOOLEAN:
-    case TYPE_TINYINT:
-    case TYPE_SMALLINT:
-    case TYPE_INT:
-    case TYPE_BIGINT:
-    case TYPE_LARGEINT:
-    case TYPE_FLOAT:
-    case TYPE_DOUBLE:
-        using T = typename PrimitiveTypeTraits<type>::CppType;
-        if (auto* col_vec = check_and_get_column<vectorized::ColumnVector<T>>(*col_ptr)) {
-            for (uint16_t i = 0; i < *size; ++i) {
-                uint16_t idx = sel[i];
-                sel[new_size] = idx;
-                const auto* cell_value = reinterpret_cast<const void*>(&col_vec->get_element(idx));
-                new_size +=
-                        (null_map_data[i] == 0 && _specific_filter->find_olap_engine(cell_value));
-            }
+        ColumnPtr nested_col = nullable->get_nested_column_ptr();
+        auto& null_map_data = nullable->get_null_map_data();
+        for (int i = 0; i < *size; ++i) {
+            uint16_t idx = sel[i];
+            sel[new_size] = idx;
+            const auto* cell_value =
+                    reinterpret_cast<const void*>(nested_col->get_data_at(idx).data);
+            new_size += (null_map_data[idx] == 0 && _specific_filter->find_olap_engine(cell_value));
         }
-        break;
-    default:
-        DCHECK(false) << "Invalid bloom filter type " << type_to_string(type);
-        break;
+    } else {
+        for (int i = 0; i < *size; ++i) {
+            uint16_t idx = sel[i];
+            sel[new_size] = idx;
+            const auto* cell_value = reinterpret_cast<const void*>(column.get_data_at(idx).data);
+            new_size += _specific_filter->find_olap_engine(cell_value);
+        }
     }
     *size = new_size;
 }
